@@ -2,7 +2,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>biz.neustar</groupId>
     <artifactId>browsermob-proxy</artifactId>
-    <version>2.0-beta-7</version>
+    <version>2.0-beta-7-atlassian-5-SNAPSHOT</version>
     <name>BrowserMob Proxy</name>
     <description>A programmatic HTTP/S designed for performance and functional testing</description>
     <url>http://opensource.webmetrics.com/browsermob-proxy</url>
@@ -37,10 +37,21 @@
     </developers>
 
     <scm>
-        <connection>scm:git:git@github.com:webmetrics/browsermob-proxy.git</connection>
-        <developerConnection>scm:git:git@github.com:webmetrics/browsermob-proxy.git</developerConnection>
-        <url>git@github.com:webmetrics/browsermob-proxy.git</url>
+        <connection>scm:git:git@github.com:atlassian/browsermob-proxy.git</connection>
+        <developerConnection>scm:git:git@github.com:atlassian/browsermob-proxy.git</developerConnection>
+        <url>git@github.com:atlassian/browsermob-proxy.git</url>
     </scm>
+
+	<distributionManagement>
+	    <repository>
+	        <id>atlassian-3rdparty</id>
+	        <url>https://maven.atlassian.com/3rdparty</url>
+	    </repository>
+	    <snapshotRepository>
+	        <id>atlassian-3rdparty-snapshot</id>
+	        <url>https://maven.atlassian.com/3rdparty-snapshot</url>
+	    </snapshotRepository>
+	</distributionManagement>
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
