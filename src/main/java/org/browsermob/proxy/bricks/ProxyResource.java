@@ -69,7 +69,7 @@ public class ProxyResource {
     public Reply<?> newHar(@Named("port") int port, Request request) {
         String initialPageRef = request.param("initialPageRef");
         ProxyServer proxy = proxyManager.get(port);
-        Har oldHar = proxy.newHar(initialPageRef);
+        Har oldHar = proxy.newHar(initialPageRef, initialPageRef);
 
         String captureHeaders = request.param("captureHeaders");
         String captureContent = request.param("captureContent");
@@ -88,7 +88,7 @@ public class ProxyResource {
     public Reply<?> setPage(@Named("port") int port, Request request) {
         String pageRef = request.param("pageRef");
         ProxyServer proxy = proxyManager.get(port);
-        proxy.newPage(pageRef);
+        proxy.newPage(pageRef, pageRef);
 
         return Reply.saying().ok();
     }
