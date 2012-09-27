@@ -15,8 +15,9 @@ public class HarPage {
     public HarPage() {
     }
 
-    public HarPage(String id) {
+    public HarPage(String id, String title) {
         this.id = id;
+        this.title = title;
         startedDateTime = new Date();
     }
 
