@@ -4,7 +4,7 @@
     <artifactId>browsermob-proxy</artifactId>
     <version>2.0-beta-7-atlassian-2-SNAPSHOT</version>
     <name>BrowserMob Proxy</name>
-    <description>A programmatic HTTP/S designed for performance and functional testing</description>
+    <description>A programmatic HTTP/S proxy designed for performance and functional testing</description>
     <url>http://opensource.webmetrics.com/browsermob-proxy</url>
     <packaging>jar</packaging>
 
