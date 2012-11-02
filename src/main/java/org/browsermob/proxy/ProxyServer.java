@@ -95,25 +95,25 @@ public class ProxyServer {
         return client.getHar();
     }
 
-    public Har newHar(String initialPageRef) {
+    public Har newHar(String initialPageRef, String title) {
         pageCount = 1;
 
         Har oldHar = getHar();
 
         Har har = new Har(new HarLog(CREATOR));
         client.setHar(har);
-        newPage(initialPageRef);
+        newPage(initialPageRef, title);
 
         return oldHar;
     }
 
-    public void newPage(String pageRef) {
+    public void newPage(String pageRef, String title) {
         if (pageRef == null) {
             pageRef = "Page " + pageCount;
         }
 
         client.setHarPageRef(pageRef);
-        currentPage = new HarPage(pageRef);
+        currentPage = new HarPage(pageRef, title);
         client.getHar().getLog().addPage(currentPage);
 
         pageCount++;
