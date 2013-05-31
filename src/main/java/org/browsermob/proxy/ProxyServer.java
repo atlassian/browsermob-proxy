@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class ProxyServer {
     private static final HarNameVersion CREATOR = new HarNameVersion("BrowserMob Proxy", "2.0");
     private static final Log LOG = new Log();
+    private static final String UNSPECIFIED = "<unspecified>";
 
     private Server server;
     private int port = -1;
@@ -121,6 +122,10 @@ public class ProxyServer {
         return client.getHar();
     }
 
+    public Har newHar(String initialPageRef) {
+        return newHar(initialPageRef, UNSPECIFIED);
+    }
+
     public Har newHar(String initialPageRef, String title) {
         pageCount = 1;
 
@@ -131,6 +136,10 @@ public class ProxyServer {
         newPage(initialPageRef, title);
 
         return oldHar;
+    }
+
+    public void newPage(String pageRef) {
+        newPage(pageRef, UNSPECIFIED);
     }
 
     public void newPage(String pageRef, String title) {
@@ -259,7 +268,6 @@ public class ProxyServer {
     }
 
     public void waitForNetworkTrafficToStop(final long quietPeriodInMs, long timeoutInMs) {
-        long start = System.currentTimeMillis();
         boolean result = ThreadUtils.waitFor(new ThreadUtils.WaitCondition() {
             @Override
             public boolean checkCondition(long elapsedTimeInMs) {
@@ -286,8 +294,6 @@ public class ProxyServer {
                 return lastCompleted != null && System.currentTimeMillis() - lastCompleted.getTime() >= quietPeriodInMs;
             }
         }, TimeUnit.MILLISECONDS, timeoutInMs);
-        long end = System.currentTimeMillis();
-        long time = (end - start);
 
         if (!result) {
             throw new RuntimeException("Timed out after " + timeoutInMs + " ms while waiting for network traffic to stop");
