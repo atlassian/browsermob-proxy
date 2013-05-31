@@ -14,14 +14,25 @@ import com.google.sitebricks.http.Put;
 import org.browsermob.core.har.Har;
 import org.browsermob.proxy.ProxyManager;
 import org.browsermob.proxy.ProxyServer;
+import org.browsermob.proxy.http.BrowserMobHttpRequest;
+import org.browsermob.proxy.http.BrowserMobHttpResponse;
+import org.browsermob.proxy.http.RequestInterceptor;
+import org.browsermob.proxy.http.ResponseInterceptor;
+import org.browsermob.proxy.util.Log;
 import org.java_bandwidthlimiter.StreamManager;
 
+import javax.script.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.HashMap;
 import java.util.Hashtable;
 import java.util.Map;
 
 @At("/proxy")
 @Service
 public class ProxyResource {
+    private static final Log LOG = new Log();
+
     private ProxyManager proxyManager;
 
     @Inject
@@ -73,8 +84,10 @@ public class ProxyResource {
 
         String captureHeaders = request.param("captureHeaders");
         String captureContent = request.param("captureContent");
+        String captureBinaryContent = request.param("captureBinaryContent"); 
         proxy.setCaptureHeaders(Boolean.parseBoolean(captureHeaders));
         proxy.setCaptureContent(Boolean.parseBoolean(captureContent));
+        proxy.setCaptureBinaryContent(Boolean.parseBoolean(captureBinaryContent)); 
 
         if (oldHar != null) {
             return Reply.with(oldHar).as(Json.class);
@@ -116,6 +129,16 @@ public class ProxyResource {
     }
 
     @Post
+    @At("/:port/auth/basic/:domain")
+    public Reply<?> autoBasicAuth(@Named("port") int port, @Named("domain") String domain, Request request) {
+        Map<String, String> credentials = request.read(HashMap.class).as(Json.class);
+        ProxyServer proxy = proxyManager.get(port);
+        proxy.autoBasicAuthorization(domain, credentials.get("username"), credentials.get("password"));
+
+        return Reply.saying().ok();
+    }
+
+    @Post
     @At("/:port/headers")
     public Reply<?> updateHeaders(@Named("port") int port, Request request) {
         ProxyServer proxy = proxyManager.get(port);
@@ -125,6 +148,68 @@ public class ProxyResource {
             String value = entry.getValue();
             proxy.addHeader(key, value);
         }
+        return Reply.saying().ok();
+    }
+
+    @Post
+    @At("/:port/interceptor/response")
+    public Reply<?> addResponseInterceptor(@Named("port") int port, Request request) throws IOException, ScriptException {
+        ProxyServer proxy = proxyManager.get(port);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        request.readTo(baos);
+
+        ScriptEngineManager mgr = new ScriptEngineManager();
+        final ScriptEngine engine = mgr.getEngineByName("JavaScript");
+        Compilable compilable = (Compilable)  engine;
+        final CompiledScript script = compilable.compile(baos.toString());
+
+        proxy.addResponseInterceptor(new ResponseInterceptor() {
+            @Override
+            public void process(BrowserMobHttpResponse response) {
+                Bindings bindings = engine.createBindings();
+                bindings.put("response", response);
+                bindings.put("log", LOG);
+                try {
+                    script.eval(bindings);
+                } catch (ScriptException e) {
+                    LOG.severe("Could not execute JS-based response interceptor", e);
+                }
+            }
+        });
+
+
+
+        return Reply.saying().ok();
+    }
+
+    @Post
+    @At("/:port/interceptor/request")
+    public Reply<?> addRequestInterceptor(@Named("port") int port, Request request) throws IOException, ScriptException {
+        ProxyServer proxy = proxyManager.get(port);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        request.readTo(baos);
+
+        ScriptEngineManager mgr = new ScriptEngineManager();
+        final ScriptEngine engine = mgr.getEngineByName("JavaScript");
+        Compilable compilable = (Compilable)  engine;
+        final CompiledScript script = compilable.compile(baos.toString());
+
+        proxy.addRequestInterceptor(new RequestInterceptor() {
+            @Override
+            public void process(BrowserMobHttpRequest request) {
+                Bindings bindings = engine.createBindings();
+                bindings.put("request", request);
+                bindings.put("log", LOG);
+                try {
+                    script.eval(bindings);
+                } catch (ScriptException e) {
+                    LOG.severe("Could not execute JS-based response interceptor", e);
+                }
+            }
+        });
+
         return Reply.saying().ok();
     }
 
@@ -160,6 +245,12 @@ public class ProxyResource {
                 streamManager.setPayloadPercentage(Integer.parseInt(payloadPercentage));
             } catch (NumberFormatException e) { }
         }
+        String maxBitsPerSecond = request.param("maxBitsPerSecond");
+        if (maxBitsPerSecond != null) {
+            try {
+                streamManager.setMaxBitsPerSecondThreshold(Integer.parseInt(maxBitsPerSecond));
+            } catch (NumberFormatException e) { }
+        }
         String enable = request.param("enable");
         if (enable != null) {
             if( Boolean.parseBoolean(enable) ) {
@@ -167,6 +258,37 @@ public class ProxyResource {
             } else {
                 streamManager.disable();
             }
+        }
+        return Reply.saying().ok();
+    }
+    
+    @Put
+    @At("/:port/timeout")
+    public Reply<?> timeout(@Named("port") int port, Request request) {
+        ProxyServer proxy = proxyManager.get(port);
+        String requestTimeout = request.param("requestTimeout");
+        if (requestTimeout != null) {
+            try {
+                proxy.setRequestTimeout(Integer.parseInt(requestTimeout));
+            } catch (NumberFormatException e) { }
+        }
+        String readTimeout = request.param("readTimeout");
+        if (readTimeout != null) {
+            try {
+                proxy.setSocketOperationTimeout(Integer.parseInt(readTimeout));
+            } catch (NumberFormatException e) { }
+        }
+        String connectionTimeout = request.param("connectionTimeout");
+        if (connectionTimeout != null) {
+            try {
+                proxy.setConnectionTimeout(Integer.parseInt(connectionTimeout));
+            } catch (NumberFormatException e) { }
+        }
+        String dnsCacheTimeout = request.param("dnsCacheTimeout");
+        if (dnsCacheTimeout != null) {
+            try {
+                proxy.setDNSCacheTimeout(Integer.parseInt(dnsCacheTimeout));
+            } catch (NumberFormatException e) { }
         }
         return Reply.saying().ok();
     }
@@ -196,6 +318,43 @@ public class ProxyResource {
     }
 
 
+    @Put
+    @At("/:port/wait")
+    public Reply<?> wait(@Named("port") int port, Request request) {
+        String quietPeriodInMs = request.param("quietPeriodInMs");
+        String timeoutInMs = request.param("timeoutInMs");
+        ProxyServer proxy = proxyManager.get(port);
+        proxy.waitForNetworkTrafficToStop(Integer.parseInt(quietPeriodInMs), Integer.parseInt(timeoutInMs));
+        return Reply.saying().ok();
+    }
+    
+    @Delete
+    @At("/:port/dns/cache")
+    public Reply<?> clearDnsCache(@Named("port") int port) throws Exception {
+    	ProxyServer proxy = proxyManager.get(port);
+    	proxy.clearDNSCache();
+        return Reply.saying().ok();
+    }
+
+    @Put
+    @At("/:port/rewrite")
+    public Reply<?> rewriteUrl(@Named("port") int port, Request request) {
+        String match = request.param("matchRegex");
+        String replace = request.param("replace");
+        ProxyServer proxy = proxyManager.get(port);
+        proxy.rewriteUrl(match, replace);
+        return Reply.saying().ok();
+    } 
+    
+    @Put
+    @At("/:port/retry")
+    public Reply<?> retryCount(@Named("port") int port, Request request) {
+        String count = request.param("retrycount");
+        ProxyServer proxy = proxyManager.get(port);
+        proxy.setRetryCount(Integer.parseInt(count));
+        return Reply.saying().ok();
+    } 
+    
     private int parseResponseCode(String response)
     {
         int responseCode = 200;

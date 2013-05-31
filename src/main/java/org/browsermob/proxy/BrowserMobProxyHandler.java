@@ -210,19 +210,13 @@ public class BrowserMobProxyHandler extends SeleniumProxyHandler {
                 while (vals.hasMoreElements()) {
                     String val = (String) vals.nextElement();
                     if (val != null) {
-                        if ("User-Agent".equals(hdr)) {
-                            val = updateUserAgent(val);
-                        }
-
-                        // don't proxy Referer headers if the referer is Selenium!
-                        if ("Referer".equals(hdr) && (-1 != val.indexOf("/selenium-server/"))) {
-                            continue;
-                        }
                         if (!isGet && HttpFields.__ContentLength.equals(hdr) && Integer.parseInt(val) > 0) {
                             hasContent = true;
                         }
 
-                        httpReq.addRequestHeader(hdr, val);
+                        if (!_DontProxyHeaders.containsKey(hdr)) {
+                            httpReq.addRequestHeader(hdr, val);
+                        }
                     }
                 }
             }
@@ -315,15 +309,6 @@ public class BrowserMobProxyHandler extends SeleniumProxyHandler {
         } catch (IOException e1) {
             LOG.warn("IOException while trying to report an HTTP error");
         }
-    }
-
-    private static String updateUserAgent(String ua) {
-        int start = ua.indexOf(")");
-        if (start > -1) {
-            ua = ua.substring(0, start) + "; BrowserMob RBU" + ua.substring(start);
-        }
-
-        return ua;
     }
 
     public void autoBasicAuthorization(String domain, String username, String password) {

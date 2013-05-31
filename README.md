@@ -40,6 +40,9 @@ Once that is done, a new proxy will be available on the port returned. All you h
 
  - PUT /proxy/[port]/har - creates a new HAR attached to the proxy and returns the HAR content if there was a previous HAR. Supports the following parameters:
   - initialPageRef - the string name of the first page ref that should be used in the HAR. Defaults to "Page 1".
+  - captureHeaders - Boolean, capture headers
+  - captureContent - Boolean, capture content bodies
+  - captureBinaryContent - Boolean, capture binary content
  - PUT /proxy/[port]/har/pageRef - starts a new page on the existing HAR. Supports the following parameters:
   - pageRef - the string name of the first page ref that should be used in the HAR. Defaults to "Page N" where N is the next page number.
  - PUT /proxy/[port]/har/pageRef - creates a new HAR attached to the proxy and returns the HAR content if there was a previous HAR
@@ -57,10 +60,27 @@ Once that is done, a new proxy will be available on the port returned. All you h
   - latency - Add the given latency to each HTTP request
   - enable - (true/false) a boolean that enable bandwidth limiter. By default the limit is disabled, although setting any of the properties above will implicitly enable throttling
   - payloadPercentage - a number ]0, 100] specifying what percentage of data sent is payload. e.g. use this to take into account overhead due to tcp/ip.
+  - maxBitsPerSecond - The max bits per seconds you want this instance of StreamManager to respect.
  - POST /proxy/[port]/headers - Set and override HTTP Request headers. For example setting a custom User-Agent.
   - Payload data should be json encoded set of headers (not url-encoded)
  - POST /proxy/[port]/hosts - Overrides normal DNS lookups and remaps the given hosts with the associated IP address
   - Payload data should be json encoded set of name/value pairs (ex: {"example.com": "1.2.3.4"})
+ - POST /proxy/[port]/auth/basic/[domain] - Sets automatic basic authentication for the specified domain
+  - Payload data should be json encoded username and password name/value pairs (ex: {"username": "myUsername", "password": "myPassword"}
+ - PUT /proxy/[port]/wait - wait till all request are being made
+  - quietPeriodInMs - Sets quiet period in milliseconds
+  - timeoutInMs - Sets timeout in milliseconds 
+ - PUT /proxy/[port]/timeout - Handles different proxy timeouts. Takes the following parameters:
+  - requestTimeout - request timeout in milliseconds
+  - readTimeout - read timeout in milliseconds. Which is the timeout for waiting for data or, put differently, a maximum period inactivity between two consecutive data packets). A timeout value of zero is interpreted as an infinite timeout.
+  - connectionTimeout - Determines the timeout in milliseconds until a connection is established. A timeout value of zero is interpreted as an infinite timeout. 
+  - dnsCacheTimeout - Sets the maximum length of time that records will be stored in this Cache. A negative value disables this feature (that is, sets no limit).
+ - PUT /proxy/[port]/rewrite - Redirecting URL's
+  - matchRegex - a matching URL regular expression
+  - replace - replacement URL
+ - PUT /proxy/[port]/retry - Setting the retry count
+  - retrycount - the number of times a method will be retried
+ - DELETE /proxy/[port]/dns/cache - Empties the Cache.
 
 For example, once you've started the proxy you can create a new HAR to start recording data like so:
 
@@ -93,7 +113,7 @@ If you're using Java and Selenium, the easiest way to get started is to embed th
     <dependency>
         <groupId>biz.neustar</groupId>
         <artifactId>browsermob-proxy</artifactId>
-        <version>LATEST_VERSION (ex: 2.0-beta-6)</version>
+        <version>LATEST_VERSION (ex: 2.0-beta-7)</version>
         <scope>test</scope>
     </dependency>
 
@@ -109,7 +129,7 @@ If your project already defines a Selenium dependency then you may want to exclu
     <dependency>
         <groupId>biz.neustar</groupId>
         <artifactId>browsermob-proxy</artifactId>
-        <version>LATEST_VERSION (ex: 2.0-beta-6)</version>
+        <version>LATEST_VERSION (ex: 2.0-beta-7)</version>
         <scope>test</scope>
         <exclusions>
             <exclusion>
@@ -154,15 +174,13 @@ HTTP Request Manipulation
 
 While not yet available via the REST interface, you can manipulate the requests like so:
 
-    server.addRequestInterceptor(new HttpRequestInterceptor() {
+    server.addRequestInterceptor(new RequestInterceptor() {
         @Override
-        public void process(HttpRequest request, HttpContext context) throws HttpException, IOException {
-            request.removeHeaders("User-Agent");
-            request.addHeader("User-Agent", "Bananabot/1.0");
+        public void process(BrowserMobHttpRequest request) {
+            request.getMethod().removeHeaders("User-Agent");
+            request.getMethod().addHeader("User-Agent", "Bananabot/1.0");
         }
     });
-
-The interceptor is the type `org.apache.http.HttpRequestInterceptor`, which is part of the [Apache HTTP Client](http://hc.apache.org/httpcomponents-client-ga/) project. You can consult the API docs for the full set of options available to you in the interceptor.
 
 We will soon be adding support for this advanced capability in the REST interface as well, using JavaScript snippets that can be posted as the interceptor code.
 
@@ -176,4 +194,4 @@ If you're doing testing with Selenium, you'll want to make sure that the browser
 NodeJS Support
 --------------
 
-NodeJS bindings for browswermob-proxy are available [here](https://github.com/zzo/browsermob-node).  Built-in support for [Selenium][http://seleniumhq.com] or use [CapserJS-on-PhantomJS](http://casperjs.org) or anything else to drive traffic for HAR generation.
+NodeJS bindings for browswermob-proxy are available [here](https://github.com/zzo/browsermob-node).  Built-in support for [Selenium](http://seleniumhq.com) or use [CapserJS-on-PhantomJS](http://casperjs.org) or anything else to drive traffic for HAR generation.

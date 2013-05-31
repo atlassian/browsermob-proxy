@@ -4,14 +4,11 @@ import cz.mallat.uasparser.CachingOnlineUpdateUASparser;
 import cz.mallat.uasparser.UASparser;
 import cz.mallat.uasparser.UserAgentInfo;
 import org.apache.http.*;
-import org.apache.http.HttpConnection;
-import org.apache.http.HttpException;
-import org.apache.http.HttpRequest;
-import org.apache.http.HttpResponse;
 import org.apache.http.auth.*;
 import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.methods.*;
 import org.apache.http.client.params.ClientPNames;
+import org.apache.http.client.params.CookiePolicy;
 import org.apache.http.client.protocol.ClientContext;
 import org.apache.http.client.utils.URLEncodedUtils;
 import org.apache.http.conn.ClientConnectionRequest;
@@ -21,7 +18,7 @@ import org.apache.http.conn.params.ConnRoutePNames;
 import org.apache.http.conn.routing.HttpRoute;
 import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
-import org.apache.http.cookie.Cookie;
+import org.apache.http.cookie.*;
 import org.apache.http.cookie.params.CookieSpecPNames;
 import org.apache.http.impl.EnglishReasonPhraseCatalog;
 import org.apache.http.impl.auth.BasicScheme;
@@ -30,16 +27,18 @@ import org.apache.http.impl.client.DefaultHttpRequestRetryHandler;
 import org.apache.http.impl.conn.tsccm.ThreadSafeClientConnManager;
 import org.apache.http.impl.cookie.BasicClientCookie;
 import org.apache.http.message.BasicStatusLine;
+import org.apache.http.impl.cookie.BrowserCompatSpec;
 import org.apache.http.params.CoreConnectionPNames;
+import org.apache.http.params.HttpParams;
 import org.apache.http.protocol.BasicHttpContext;
 import org.apache.http.protocol.ExecutionContext;
 import org.apache.http.protocol.HttpContext;
 import org.apache.http.protocol.HttpRequestExecutor;
 import org.browsermob.core.har.*;
 import org.browsermob.proxy.util.*;
-import org.java_bandwidthlimiter.StreamManager;
 import org.eclipse.jetty.util.MultiMap;
 import org.eclipse.jetty.util.UrlEncoded;
+import org.java_bandwidthlimiter.StreamManager;
 import org.xbill.DNS.Cache;
 import org.xbill.DNS.DClass;
 
@@ -56,15 +55,35 @@ import java.util.regex.Pattern;
 import java.util.zip.GZIPInputStream;
 
 public class BrowserMobHttpClient {
-    private static final int BUFFER = 4096;
-
     private static final Log LOG = new Log();
+    public static UASparser PARSER = null;
+
+    static {
+        try {
+            PARSER = new CachingOnlineUpdateUASparser();
+        } catch (IOException e) {
+            LOG.severe("Unable to create User-Agent parser, falling back but proxy is in damaged state and should be restarted", e);
+            try {
+                PARSER = new UASparser();
+            } catch (Exception e1) {
+                // ignore
+            }
+        }
+    }
+
+    public static void setUserAgentParser(UASparser parser) {
+        PARSER = parser;
+    }
+
+    private static final int BUFFER = 4096;
 
     private Har har;
     private String harPageRef;
 
     private boolean captureHeaders;
     private boolean captureContent;
+    // if captureContent is set, default policy is to capture binary contents too
+    private boolean captureBinaryContent = true;
 
     private SimulatedSocketFactory socketFactory;
     private TrustingSSLSocketFactory sslSocketFactory;
@@ -157,6 +176,7 @@ public class BrowserMobHttpClient {
         httpClient.setCredentialsProvider(credsProvider);
         httpClient.addRequestInterceptor(new PreemptiveAuth(), 0);
         httpClient.getParams().setParameter(ClientPNames.HANDLE_REDIRECTS, true);
+        httpClient.getParams().setParameter(ClientPNames.COOKIE_POLICY, CookiePolicy.BROWSER_COMPATIBILITY);
         httpClient.getParams().setParameter(CookieSpecPNames.SINGLE_COOKIE_HEADER, Boolean.TRUE);
         setRetryCount(0);
 
@@ -403,8 +423,7 @@ public class BrowserMobHttpClient {
                 String userAgent = uaHeaders[0].getValue();
                 try {
                     // note: this doesn't work for 'Fandango/4.5.1 CFNetwork/548.1.4 Darwin/11.0.0'
-                    UASparser p = new CachingOnlineUpdateUASparser();
-                    UserAgentInfo uai = p.parse(userAgent);
+                    UserAgentInfo uai = PARSER.parse(userAgent);
                     String name = uai.getUaName();
                     int lastSpace = name.lastIndexOf(' ');
                     String browser = name.substring(0, lastSpace);
@@ -478,6 +497,7 @@ public class BrowserMobHttpClient {
         InputStream is = null;
         int statusCode = -998;
         long bytes = 0;
+        boolean gzipping = false;
         boolean contentMatched = true;
         OutputStream os = req.getOutputStream();
         if (os == null) {
@@ -488,19 +508,20 @@ public class BrowserMobHttpClient {
         }
         Date start = new Date();
 
-        // clear out any connection-related information so that it's not stale from previous use of this thread.
-        RequestInfo.clear(url);
-
         // link the object up now, before we make the request, so that if we get cut off (ie: favicon.ico request and browser shuts down)
         // we still have the attempt associated, even if we never got a response
         HarEntry entry = new HarEntry(harPageRef);
+
+        // clear out any connection-related information so that it's not stale from previous use of this thread.
+        RequestInfo.clear(url, entry);
+
         entry.setRequest(new HarRequest(method.getMethod(), url, method.getProtocolVersion().getProtocol()));
         entry.setResponse(new HarResponse(-999, "NO RESPONSE", method.getProtocolVersion().getProtocol()));
         if (this.har != null && harPageRef != null) {
             har.getLog().addEntry(entry);
         }
         
-    	String query = method.getURI().getQuery();
+    	String query = method.getURI().getRawQuery();
     	if (query != null) {
 	        MultiMap<String> params = new MultiMap<String>();
 	        UrlEncoded.decodeTo(query, params, "UTF-8");
@@ -581,16 +602,20 @@ public class BrowserMobHttpClient {
 
                 // check for null (resp 204 can cause HttpClient to return null, which is what Google does with http://clients1.google.com/generate_204)
                 if (is != null) {
+                    Header contentEncodingHeader = response.getFirstHeader("Content-Encoding");
+                    if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
+                        gzipping = true;
+                    }
+
                     // deal with GZIP content!
-                    if (decompress) {
-                        Header contentEncodingHeader = response.getFirstHeader("Content-Encoding");
-                        if (contentEncodingHeader != null && "gzip".equalsIgnoreCase(contentEncodingHeader.getValue())) {
-                            is = new GZIPInputStream(is);
-                        }
+                    if (decompress && gzipping) {
+                        is = new GZIPInputStream(is);
                     }
 
                     if (captureContent) {
+                        // todo - something here?
                         os = new ClonedOutputStream(os);
+
                     }
 
                     bytes = copyWithStats(is, os);
@@ -663,15 +688,16 @@ public class BrowserMobHttpClient {
                 HttpEntityEnclosingRequestBase enclosingReq = (HttpEntityEnclosingRequestBase) method;
                 HttpEntity entity = enclosingReq.getEntity();
 
+                HarPostData data = new HarPostData();
+                data.setMimeType(req.getMethod().getFirstHeader("Content-Type").getValue());
+                entry.getRequest().setPostData(data);
+
                 if (urlEncoded || URLEncodedUtils.isEncoded(entity)) {
                     try {
                         final String content = new String(req.getCopy().toByteArray(), "UTF-8");
                         if (content != null && content.length() > 0) {
                             List<NameValuePair> result = new ArrayList<NameValuePair>();
                             URLEncodedUtils.parse(result, new Scanner(content), null);
-
-                            HarPostData data = new HarPostData();
-                            entry.getRequest().setPostData(data);
 
                             ArrayList<HarPostDataParam> params = new ArrayList<HarPostDataParam>();
                             data.setParams(params);
@@ -683,17 +709,20 @@ public class BrowserMobHttpClient {
                     } catch (Exception e) {
                         LOG.info("Unexpected problem when parsing input copy", e);
                     }
+                } else {
+                    // not URL encoded, so let's grab the body of the POST and capture that
+                    data.setText(new String(req.getCopy().toByteArray()));
                 }
             }
         }
 
-        //capture request cookies       
-        List<Cookie> cookies = (List<Cookie>) ctx.getAttribute("browsermob.http.request.cookies");        
-        if (cookies != null) {
-	        for (Cookie c : cookies) {
-		        HarCookie hc = toHarCookie(c);
-		        entry.getRequest().getCookies().add(hc);        	
-	        }
+        //capture request cookies
+        javax.servlet.http.Cookie[] cookies = req.getProxyRequest().getCookies();
+        for (javax.servlet.http.Cookie cookie : cookies) {
+            HarCookie hc = new HarCookie();
+            hc.setName(cookie.getName());
+            hc.setValue(cookie.getValue());
+            entry.getRequest().getCookies().add(hc);
         }
 
         String contentType = null;
@@ -708,9 +737,25 @@ public class BrowserMobHttpClient {
                     if (captureContent && os != null && os instanceof ClonedOutputStream) {
                         ByteArrayOutputStream copy = ((ClonedOutputStream) os).getOutput();
 
-                        if (contentType != null && contentType.startsWith("text/")) {
+                        if (gzipping) {
+                            // ok, we need to decompress it before we can put it in the har file
+                            try {
+                                InputStream temp = new GZIPInputStream(new ByteArrayInputStream(copy.toByteArray()));
+                                copy = new ByteArrayOutputStream();
+                                IOUtils.copy(temp, copy);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        }
+
+                        if (contentType != null && (contentType.startsWith("text/")  || 
+                        		contentType.startsWith("application/x-javascript")) ||
+                        		contentType.startsWith("application/javascript")  ||
+                        		contentType.startsWith("application/json")  ||
+                        		contentType.startsWith("application/xml")  ||
+                        		contentType.startsWith("application/xhtml+xml")) {
                             entry.getResponse().getContent().setText(new String(copy.toByteArray()));
-                        } else {
+                        } else if(captureBinaryContent){
                             entry.getResponse().getContent().setText(Base64.byteArrayToBase64(copy.toByteArray()));
                         }
                     }
@@ -732,15 +777,6 @@ public class BrowserMobHttpClient {
                 }
             } catch (UnsupportedEncodingException e) {
                 throw new RuntimeException(e);
-            }
-            
-            //capture response cookies
-            cookies = (List<Cookie>) ctx.getAttribute("browsermob.http.response.cookies");            
-            if (cookies != null) {
-    	        for (Cookie c : cookies) {
-    		        HarCookie hc = toHarCookie(c);
-    		        entry.getResponse().getCookies().add(hc);        	
-    	        }
             }
         }
 
@@ -906,9 +942,20 @@ public class BrowserMobHttpClient {
     }
 
     public void prepareForBrowser() {
-    	//save request and reponse cookies to the context
-    	httpClient.addRequestInterceptor(new RequestCookiesInterceptor());
-    	httpClient.addResponseInterceptor(new ResponseCookiesInterceptor());
+        // Clear cookies, let the browser handle them
+        httpClient.setCookieStore(new BlankCookieStore());
+        httpClient.getCookieSpecs().register("easy", new CookieSpecFactory() {
+            @Override
+            public CookieSpec newInstance(HttpParams params) {
+                return new BrowserCompatSpec() {
+                    @Override
+                    public void validate(Cookie cookie, CookieOrigin origin) throws MalformedCookieException {
+                        // easy!
+                    }
+                };
+            }
+        });
+        httpClient.getParams().setParameter(ClientPNames.COOKIE_POLICY, "easy");
         decompress = false;
         setFollowRedirects(false);
     }
@@ -931,6 +978,10 @@ public class BrowserMobHttpClient {
 
     public void setCaptureContent(boolean captureContent) {
         this.captureContent = captureContent;
+    }
+    
+    public void setCaptureBinaryContent(boolean captureBinaryContent) {
+        this.captureBinaryContent = captureBinaryContent;
     }
 
     public void setHttpProxy(String httpProxy) {
@@ -968,16 +1019,6 @@ public class BrowserMobHttpClient {
                 }
             }
         }
-    }
-        
-    private HarCookie toHarCookie(Cookie c) {
-        HarCookie hc = new HarCookie();
-        hc.setName(c.getName());
-        hc.setPath(c.getPath());
-        hc.setValue(c.getValue());
-        hc.setDomain(c.getDomain());
-        hc.setExpires(c.getExpiryDate());
-        return hc;    	
     }
 
     class ActiveRequest {
