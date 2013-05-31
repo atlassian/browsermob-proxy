@@ -23,11 +23,13 @@ import org.apache.http.conn.scheme.Scheme;
 import org.apache.http.conn.scheme.SchemeRegistry;
 import org.apache.http.cookie.Cookie;
 import org.apache.http.cookie.params.CookieSpecPNames;
+import org.apache.http.impl.EnglishReasonPhraseCatalog;
 import org.apache.http.impl.auth.BasicScheme;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.impl.client.DefaultHttpRequestRetryHandler;
 import org.apache.http.impl.conn.tsccm.ThreadSafeClientConnManager;
 import org.apache.http.impl.cookie.BasicClientCookie;
+import org.apache.http.message.BasicStatusLine;
 import org.apache.http.params.CoreConnectionPNames;
 import org.apache.http.protocol.BasicHttpContext;
 import org.apache.http.protocol.ExecutionContext;
@@ -557,6 +559,12 @@ public class BrowserMobHttpClient {
                             }
                         }
                 });
+                
+                // create sane response for black/whitelisted URLs, otherwise we'd be returning a 200 OK
+                if (callback != null) {
+                    callback.handleStatusLine(new BasicStatusLine(new ProtocolVersion("HTTP", 1, 1), mockResponseCode, EnglishReasonPhraseCatalog.INSTANCE.getReason(mockResponseCode, Locale.getDefault())));
+                }
+                
             } else {
                 response = httpClient.execute(method, ctx);
                 statusLine = response.getStatusLine();
