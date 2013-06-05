@@ -263,6 +263,7 @@ public class BrowserMobProxyHandler extends SeleniumProxyHandler {
 
                 @Override
                 public void reportError(Exception e) {
+                    LOG.warn(String.format("%s when calling URL [%s]: [%s]", e.getClass().getSimpleName(), url.toExternalForm(), e.getMessage()));
                     BrowserMobProxyHandler.reportError(e, url, response);
                 }
             });
@@ -307,13 +308,12 @@ public class BrowserMobProxyHandler extends SeleniumProxyHandler {
         String shortDesc = String.format(error.getShortDesc(), url.getHost());
         String text = String.format(FirefoxErrorConstants.ERROR_PAGE, error.getTitle(), shortDesc, error.getLongDesc());
 
-
         try {
             response.setStatus(HttpResponse.__502_Bad_Gateway);
             response.setContentLength(text.length());
             response.getOutputStream().write(text.getBytes());
         } catch (IOException e1) {
-            LOG.warn("IOException while trying to report an HTTP error");
+            LOG.warn(String.format("IOException while trying to report an HTTP error back to the client: [%s]", e1.getMessage()));
         }
     }
 
